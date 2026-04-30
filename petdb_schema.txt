@@ -1,0 +1,120 @@
+DATABASE: petdb_backarc.sqlite
+TABLE: samples
+ROWS: 10,581
+SOURCE: EarthChem PetDB export, back-arc basin basalts (igneous:volcanic:mafic, BASALT)
+FILTERS APPLIED: analysisTypes=rock, tectonicSettings=BACK-ARC BASIN, geoFeatures=BACK-ARC_BASIN, taxons=igneous:volcanic:mafic:BASALT
+
+IMPORTANT: Many columns are sparse (high NULL rates). Always use IS NOT NULL filters when
+doing calculations or comparisons on geochemical columns.
+
+NOTE ON sample_name: Not a unique identifier. row_id is the true unique key.
+
+COLUMNS:
+  row_id            INTEGER   -- Primary key
+  sample_name       TEXT      -- Sample identifier (not unique across studies)
+  citation          TEXT      -- Full bibliographic citation
+  latitude          REAL      -- Decimal degrees, negative = South
+  longitude         REAL      -- Decimal degrees, negative = West
+  analyzed_material TEXT      -- WHOLE ROCK, GLASS, or UNSPECIFIED ROCK MATERIAL AS WHOLE ROCK OR GLASS
+  basin_name        TEXT      -- Back-arc basin name. Values: LAU, MARIANA TROUGH, MANUS,
+                                 SHIKOKU, NORTH FIJI, WOODLARK, IZU-BONIN, EAST MARIANA,
+                                 YAMATO, DAITO, SUMISU, HAVRE TROUGH, NAURU, SOUTH SANDWICH,
+                                 OKINAWA TROUGH, BRANSFIELD STRAIT, SCOTIA SEA,
+                                 WEST PHILIPPINE, SULU SEA, TORISHIMA RIFT
+  tectonic_setting  TEXT      -- e.g. BACK-ARC BASIN, BACK-ARC BASIN,OLD OCEANIC CRUST
+  elevation_m       REAL      -- Min depth/elevation in meters (negative = submarine). ~92% populated.
+  elevation_max_m   REAL      -- Max depth/elevation in meters. ~74% populated.
+  sample_alteration TEXT      -- Alteration state of the sample. ~32% populated.
+  rock_texture      TEXT      -- Rock texture description. ~26% populated.
+  geologic_age      TEXT      -- Geologic age label. ~7% populated.
+  station_site      TEXT      -- Station or site identifier. 100% populated.
+  expedition        TEXT      -- Expedition or cruise identifier. 100% populated.
+
+--- MAJOR ELEMENT OXIDES (wt%) ---
+  sio2    REAL  -- Silicon dioxide (~32% populated). Typical basalt range 45-55 wt%
+  tio2    REAL  -- Titanium dioxide (~33% populated)
+  al2o3   REAL  -- Aluminum oxide (~31% populated)
+  feot    REAL  -- Total iron as FeO (~17% populated)
+  mgo     REAL  -- Magnesium oxide (~32% populated). Key differentiation indicator
+  mno     REAL  -- Manganese oxide (~28% populated)
+  cao     REAL  -- Calcium oxide (~31% populated)
+  na2o    REAL  -- Sodium oxide (~32% populated)
+  k2o     REAL  -- Potassium oxide (~33% populated). Elevated K2O suggests slab fluid input
+  p2o5    REAL  -- Phosphorus pentoxide (~32% populated). Elevated in alkaline rocks
+
+--- TRACE ELEMENTS (ppm unless noted) ---
+  rb      REAL  -- Rubidium (~24% populated). Fluid-mobile; Rb/Sr tracks crustal input
+  sr      REAL  -- Strontium (~27% populated). Fluid-mobile
+  ba      REAL  -- Barium (~24% populated). Highly fluid-mobile; Ba/Nb detects subduction signature
+  cs      REAL  -- Cesium (~10% populated). Most fluid-mobile alkali
+  y       REAL  -- Yttrium (~23% populated). HREE proxy; Zr/Y discrimination diagram
+  zr      REAL  -- Zirconium (~23% populated). HFSE, fluid-immobile
+  hf      REAL  -- Hafnium (~13% populated). Pairs with Zr; Zr/Hf ~ 36 in primitive mantle
+  nb      REAL  -- Niobium (~20% populated). Fluid-immobile HFSE. Low Nb/U signals crustal input
+  ta      REAL  -- Tantalum (~11% populated). Pairs with Nb; Nb/Ta ~ 17 in primitive mantle
+  th      REAL  -- Thorium (~15% populated). Highly incompatible
+  u       REAL  -- Uranium (~12% populated). Nb/U ~47 is characteristic of MORB/OIB mantle
+  pb      REAL  -- Lead (~16% populated). Ce/Pb and Nb/U are diagnostic mantle source ratios
+  v       REAL  -- Vanadium (~16% populated). Compatible; V/Sc tracks oxygen fugacity
+  cr      REAL  -- Chromium (~21% populated). Compatible; high Cr indicates primitive melt
+  co      REAL  -- Cobalt (~12% populated). Compatible; pairs with Ni
+  ni      REAL  -- Nickel (~22% populated). Compatible; high Ni + high MgO = very primitive basalt
+  sc      REAL  -- Scandium (~13% populated). Compatible in clinopyroxene; buffered during MORB melting
+
+--- RARE EARTH ELEMENTS (ppm) ---
+  la      REAL  -- Lanthanum, LREE (~18% populated)
+  ce      REAL  -- Cerium, LREE (~19% populated). Ce/Pb is a key mantle source discriminant
+  pr      REAL  -- Praseodymium, LREE (~11% populated)
+  nd      REAL  -- Neodymium, MREE (~16% populated). Sm/Nd ratio for isotope systematics
+  sm      REAL  -- Samarium, MREE (~16% populated). La/Sm and Sm/Nd are core depletion indicators
+  eu      REAL  -- Europium, MREE (~16% populated). Eu anomaly detects plagioclase fractionation
+  gd      REAL  -- Gadolinium, MREE (~13% populated)
+  dy      REAL  -- Dysprosium, HREE (~13% populated)
+  ho      REAL  -- Holmium, HREE (~11% populated)
+  er      REAL  -- Erbium, HREE (~13% populated)
+  yb      REAL  -- Ytterbium, HREE (~16% populated). La/Yb indicates garnet in residue
+  lu      REAL  -- Lutetium, HREE (~13% populated). Lu/Hf ratio for isotope systematics
+
+--- ISOTOPE RATIOS (dimensionless) ---
+  rb87_sr86   REAL  -- 87Rb/86Sr parent/daughter ratio (<1% populated)
+  sr87_sr86   REAL  -- 87Sr/86Sr (~8% populated). MORB-like ~0.7025; arc-influenced >0.7035
+  sm147_nd144 REAL  -- 147Sm/144Nd parent/daughter ratio (<1% populated)
+  nd143_nd144 REAL  -- 143Nd/144Nd (~7% populated). Higher = more depleted source
+  e_nd        REAL  -- Epsilon-Nd (~2% populated). Deviation from chondritic; positive = depleted
+  pb206_pb204 REAL  -- 206Pb/204Pb (~5% populated). HIMU sources >20; depleted MORB ~17.5-18.5
+  pb207_pb204 REAL  -- 207Pb/204Pb (~5% populated). Elevated in continental-derived material
+  pb208_pb204 REAL  -- 208Pb/204Pb (~5% populated). Th/U integrated over Earth history
+
+--- USEFUL DERIVED RATIOS (compute inline in SQL) ---
+  Nb/U  = nb / u      -- ~47 for MORB/OIB mantle; <20 suggests crustal contamination
+  Ce/Pb = ce / pb     -- diagnostic mantle source ratio; high in OIB/MORB, low in arc/crust
+  La/Sm = la / sm     -- MORB source depletion indicator
+  Sm/Nd = sm / nd     -- parent/daughter ratio for Nd isotope systematics
+  La/Yb = la / yb     -- REE fractionation and garnet signature
+  Ba/Nb = ba / nb     -- High values indicate subduction fluid input
+  Zr/Nb = zr / nb     -- Source depletion indicator
+  Zr/Hf = zr / hf     -- ~36 in primitive mantle; deviations indicate fractionation
+  Nb/Ta = nb / ta     -- ~17 in primitive mantle
+  Rb/Sr = rb / sr     -- Fluid mobility ratio; elevated in arc settings
+  Eu/Eu* = eu anomaly -- compute as eu / (sm * gd)^0.5 to detect plagioclase signature
+
+EXAMPLE QUERIES:
+  -- Complete REE pattern for a basin:
+  SELECT basin_name, ROUND(AVG(la),2), ROUND(AVG(ce),2), ROUND(AVG(nd),2),
+         ROUND(AVG(sm),2), ROUND(AVG(eu),2), ROUND(AVG(gd),2),
+         ROUND(AVG(dy),2), ROUND(AVG(yb),2), ROUND(AVG(lu),2), COUNT(*) AS n
+  FROM samples
+  WHERE la IS NOT NULL AND yb IS NOT NULL
+  GROUP BY basin_name ORDER BY n DESC;
+
+  -- Ce/Pb ratio as mantle source discriminant:
+  SELECT sample_name, basin_name, ce, pb, ROUND(ce/pb, 2) AS ce_pb
+  FROM samples
+  WHERE ce IS NOT NULL AND pb IS NOT NULL AND pb > 0
+  ORDER BY ce_pb DESC;
+
+  -- Primitive basalts using Ni, Cr, and MgO:
+  SELECT sample_name, basin_name, mgo, ni, cr, sc
+  FROM samples
+  WHERE mgo > 10 AND ni IS NOT NULL AND cr IS NOT NULL
+  ORDER BY mgo DESC;
