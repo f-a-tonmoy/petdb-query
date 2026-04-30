@@ -367,9 +367,19 @@ def validate_sql(sql):
         'max', 'round', 'distinct', 'case', 'when', 'then', 'else', 'end',
         'samples', 'asc', 'desc', 'between', 'like', 'cast', 'coalesce',
         'over', 'partition', 'iif', 'abs', 'length', 'upper', 'lower',
-        'sqrt', 'power', 'substr', 'trim',
+        'sqrt', 'power', 'substr', 'trim', 'ifnull', 'nullif', 'typeof',
+        'integer', 'real', 'text', 'blob', 'numeric', 'true', 'false',
     }
+
+    # strip string literals (single-quoted values)
     sql_no_strings = re.sub(r"'[^']*'", '', sql_lower)
+
+    # strip THEN/ELSE clause values -- these are label strings not column refs
+    # e.g. THEN 'alkali_basalt' becomes THEN '' after single-quote strip,
+    # but bare word labels like THEN tholeiite need stripping too
+    sql_no_strings = re.sub(r'\bthen\s+[a-z_][a-z0-9_]*', 'then', sql_no_strings)
+    sql_no_strings = re.sub(r'\belse\s+[a-z_][a-z0-9_]*', 'else', sql_no_strings)
+
     aliases = set(re.findall(r'\bas\s+([a-z_][a-z0-9_]*)', sql_no_strings))
     tokens  = re.findall(r'[a-z_][a-z0-9_]*', sql_no_strings)
     unknown = [
@@ -580,7 +590,7 @@ def main():
 
             valid, reason = validate_sql(sql)
             if not valid:
-                st.session_state['fallback'] = f'{FALLBACK}<br><br><small>{reason}</small>'
+                st.session_state['fallback'] = FALLBACK
                 st.session_state['sql']      = sql
                 st.session_state['df']       = None
                 st.session_state['summary']  = None
@@ -619,12 +629,6 @@ def main():
             f'<div class="fallback-block">{st.session_state["fallback"]}</div>',
             unsafe_allow_html=True
         )
-        if st.session_state['sql']:
-            with st.expander('Generated SQL (debugging)', expanded=False):
-                st.markdown(
-                    f'<div class="sql-block">{st.session_state["sql"]}</div>',
-                    unsafe_allow_html=True
-                )
 
     elif st.session_state['error']:
         st.error(st.session_state['error'])
