@@ -346,12 +346,15 @@ def call_groq(client, messages, max_tokens, temperature):
     except Exception as e:
         msg = str(e).lower()
         if 'rate limit' in msg or '429' in msg or 'too many requests' in msg:
-            st.error('Rate limit reached. Please wait a minute and try again.')
-            st.stop()
+            raise RateLimitError()
         raise
     raw = response.choices[0].message.content.strip()
     raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
     return raw
+
+
+class RateLimitError(Exception):
+    pass
 
 
 def generate_sql(question, client, schema, idx, all_chunks, chunk_sources):
@@ -605,8 +608,13 @@ def main():
             st.session_state['summary'] = None
             st.session_state['error']   = None
         else:
-            with st.spinner('Generating SQL...'):
-                sql = generate_sql(question, client, schema, idx, chunks, sources)
+            try:
+                with st.spinner('Generating SQL...'):
+                    sql = generate_sql(question, client, schema, idx, chunks, sources)
+            except RateLimitError:
+                st.session_state['fallback'] = 'Rate limit reached. Please wait a minute and try again.'
+                st.session_state['sql'] = st.session_state['df'] = st.session_state['summary'] = None
+                st.rerun()
 
             valid, reason = validate_sql(sql)
             if not valid:
@@ -634,9 +642,13 @@ def main():
                         st.session_state['summary']  = None
                         st.session_state['filename'] = 'petdb_results.csv'
                     else:
-                        with st.spinner('Interpreting results...'):
-                            summary  = generate_summary(df, question, client)
-                            filename = generate_filename(question, client)
+                        try:
+                            with st.spinner('Interpreting results...'):
+                                summary  = generate_summary(df, question, client)
+                                filename = generate_filename(question, client)
+                        except RateLimitError:
+                            summary  = None
+                            filename = 'petdb_results.csv'
                         st.session_state['df']       = df
                         st.session_state['summary']  = summary
                         st.session_state['filename'] = filename
