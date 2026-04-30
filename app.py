@@ -341,7 +341,14 @@ def call_groq(client, messages, max_tokens, temperature):
     kwargs = dict(model=GROQ_MODEL_ID, messages=messages, max_tokens=max_tokens)
     if temperature > 0:
         kwargs['temperature'] = temperature
-    response = client.chat.completions.create(**kwargs)
+    try:
+        response = client.chat.completions.create(**kwargs)
+    except Exception as e:
+        msg = str(e).lower()
+        if 'rate limit' in msg or '429' in msg or 'too many requests' in msg:
+            st.error('Rate limit reached. Please wait a minute and try again.')
+            st.stop()
+        raise
     raw = response.choices[0].message.content.strip()
     raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
     return raw
