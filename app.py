@@ -4,7 +4,6 @@ import pickle
 import sqlite3
 from pathlib import Path
 
-import fitz
 import faiss
 import numpy as np
 import pandas as pd
@@ -141,7 +140,6 @@ h1, h2, h3 { font-family: "DM Serif Display", serif; }
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DB_PATH        = 'petdb_backarc.sqlite'
 SCHEMA_PATH    = 'petdb_schema.txt'
-DOC_DIR        = Path('doc')
 CACHE_DIR      = Path('cache')
 FAISS_PATH     = CACHE_DIR / 'rag_index.faiss'
 CHUNKS_PATH    = CACHE_DIR / 'rag_chunks.pkl'
@@ -195,53 +193,15 @@ def load_embedder():
     return SentenceTransformer(EMBED_MODEL_ID)
 
 
-@st.cache_resource(show_spinner='Building RAG index...')
+@st.cache_resource(show_spinner='Loading RAG index...')
 def load_rag(_embedder):
-    if FAISS_PATH.exists() and CHUNKS_PATH.exists():
-        idx = faiss.read_index(str(FAISS_PATH))
-        with open(CHUNKS_PATH, 'rb') as f:
-            data = pickle.load(f)
-        return idx, data['chunks'], data['sources']
-
-    def extract_pdf(path):
-        doc = fitz.open(str(path))
-        pages = []
-        for page in doc:
-            text = page.get_text()
-            text = re.sub(r'\n{3,}', '\n\n', text)
-            pages.append(text.strip())
-        doc.close()
-        return '\n\n'.join(pages)
-
-    def chunk(text, size=500, overlap=100):
-        chunks = []
-        start = 0
-        while start < len(text):
-            c = text[start:start + size].strip()
-            if c:
-                chunks.append(c)
-            start += size - overlap
-        return chunks
-
-    all_chunks, chunk_sources = [], []
-    for pdf in DOC_DIR.glob('*.pdf'):
-        cs = chunk(extract_pdf(pdf))
-        all_chunks.extend(cs)
-        chunk_sources.extend([pdf.name] * len(cs))
-
-    embeddings = _embedder.encode(
-        all_chunks, batch_size=64, show_progress_bar=False,
-        convert_to_numpy=True, normalize_embeddings=True,
-    ).astype(np.float32)
-
-    idx = faiss.IndexFlatIP(embeddings.shape[1])
-    idx.add(embeddings)
-
-    faiss.write_index(idx, str(FAISS_PATH))
-    with open(CHUNKS_PATH, 'wb') as f:
-        pickle.dump({'chunks': all_chunks, 'sources': chunk_sources}, f)
-
-    return idx, all_chunks, chunk_sources
+    if not FAISS_PATH.exists() or not CHUNKS_PATH.exists():
+        st.error('RAG cache not found. Please add cache/rag_index.faiss and cache/rag_chunks.pkl to the repo.')
+        st.stop()
+    idx = faiss.read_index(str(FAISS_PATH))
+    with open(CHUNKS_PATH, 'rb') as f:
+        data = pickle.load(f)
+    return idx, data['chunks'], data['sources']
 
 
 @st.cache_data
@@ -372,8 +332,85 @@ def generate_summary(df, question, client):
     return call_groq(client, messages, max_tokens=200, temperature=0.3)
 
 
+# ── Column catalogue ──────────────────────────────────────────────────────────
+COLUMN_CATALOGUE = [
+    # Identifiers and metadata
+    ('row_id',            '--',   'Primary key'),
+    ('sample_name',       '--',   'Sample identifier (not unique across studies)'),
+    ('citation',          '--',   'Bibliographic citation'),
+    ('latitude',          'deg',  'Decimal degrees, negative = South'),
+    ('longitude',         'deg',  'Decimal degrees, negative = West'),
+    ('analyzed_material', '--',   'WHOLE ROCK, GLASS, or UNSPECIFIED'),
+    ('basin_name',        '--',   'Back-arc basin name'),
+    ('tectonic_setting',  '--',   'Tectonic setting label'),
+    ('elevation_m',       'm',    'Min depth/elevation, negative = submarine'),
+    ('elevation_max_m',   'm',    'Max depth/elevation'),
+    ('sample_alteration', '--',   'Alteration state'),
+    ('rock_texture',      '--',   'Rock texture description'),
+    ('geologic_age',      '--',   'Geologic age label'),
+    ('station_site',      '--',   'Station or site identifier'),
+    ('expedition',        '--',   'Expedition or cruise identifier'),
+    # Major oxides
+    ('sio2',  'wt%', 'Silicon dioxide'),
+    ('tio2',  'wt%', 'Titanium dioxide'),
+    ('al2o3', 'wt%', 'Aluminum oxide'),
+    ('feot',  'wt%', 'Total iron as FeO'),
+    ('mgo',   'wt%', 'Magnesium oxide'),
+    ('mno',   'wt%', 'Manganese oxide'),
+    ('cao',   'wt%', 'Calcium oxide'),
+    ('na2o',  'wt%', 'Sodium oxide'),
+    ('k2o',   'wt%', 'Potassium oxide'),
+    ('p2o5',  'wt%', 'Phosphorus pentoxide'),
+    # Trace elements
+    ('rb', 'ppm', 'Rubidium'),
+    ('sr', 'ppm', 'Strontium'),
+    ('ba', 'ppm', 'Barium'),
+    ('cs', 'ppm', 'Cesium'),
+    ('y',  'ppm', 'Yttrium'),
+    ('zr', 'ppm', 'Zirconium'),
+    ('hf', 'ppm', 'Hafnium'),
+    ('nb', 'ppm', 'Niobium'),
+    ('ta', 'ppm', 'Tantalum'),
+    ('th', 'ppm', 'Thorium'),
+    ('u',  'ppm', 'Uranium'),
+    ('pb', 'ppm', 'Lead'),
+    ('v',  'ppm', 'Vanadium'),
+    ('cr', 'ppm', 'Chromium'),
+    ('co', 'ppm', 'Cobalt'),
+    ('ni', 'ppm', 'Nickel'),
+    ('sc', 'ppm', 'Scandium'),
+    # REE
+    ('la', 'ppm', 'Lanthanum'),
+    ('ce', 'ppm', 'Cerium'),
+    ('pr', 'ppm', 'Praseodymium'),
+    ('nd', 'ppm', 'Neodymium'),
+    ('sm', 'ppm', 'Samarium'),
+    ('eu', 'ppm', 'Europium'),
+    ('gd', 'ppm', 'Gadolinium'),
+    ('dy', 'ppm', 'Dysprosium'),
+    ('ho', 'ppm', 'Holmium'),
+    ('er', 'ppm', 'Erbium'),
+    ('yb', 'ppm', 'Ytterbium'),
+    ('lu', 'ppm', 'Lutetium'),
+    # Isotope ratios
+    ('rb87_sr86',   '--', '87Rb/86Sr ratio'),
+    ('sr87_sr86',   '--', '87Sr/86Sr ratio'),
+    ('sm147_nd144', '--', '147Sm/144Nd ratio'),
+    ('nd143_nd144', '--', '143Nd/144Nd ratio'),
+    ('e_nd',        '--', 'Epsilon-Nd'),
+    ('pb206_pb204', '--', '206Pb/204Pb ratio'),
+    ('pb207_pb204', '--', '207Pb/204Pb ratio'),
+    ('pb208_pb204', '--', '208Pb/204Pb ratio'),
+]
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 def main():
+    # Session state init
+    for key in ['sql', 'df', 'summary', 'error', 'fallback']:
+        if key not in st.session_state:
+            st.session_state[key] = None
+
     # Header
     st.markdown('''
     <div class="header-band">
@@ -404,10 +441,17 @@ def main():
     <div class="stat-row">
         <div class="stat-card"><div class="val">10,581</div><div class="lbl">samples</div></div>
         <div class="stat-card"><div class="val">{basins}</div><div class="lbl">basins</div></div>
-        <div class="stat-card"><div class="val">~60</div><div class="lbl">geochemical columns</div></div>
+        <div class="stat-card"><div class="val">62</div><div class="lbl">retained columns</div></div>
         <div class="stat-card"><div class="val">1</div><div class="lbl">RAG document</div></div>
     </div>
     ''', unsafe_allow_html=True)
+
+    # Column catalogue expander
+    with st.expander(f'View all 62 retained columns', expanded=False):
+        cat_df = pd.DataFrame(COLUMN_CATALOGUE, columns=['Column', 'Unit', 'Description'])
+        st.dataframe(cat_df, use_container_width=True, hide_index=True)
+
+    st.markdown('---')
 
     # Query input
     st.markdown('#### Ask a question')
@@ -420,61 +464,103 @@ def main():
 
     run = st.button('Run Query', use_container_width=False)
 
-    if not run:
-        return
+    if run:
+        question = question.strip()
+        if not question or question.upper() == 'YOUR QUESTION HERE':
+            st.warning('Please enter a question.')
+            st.stop()
+        if len(question) < 10:
+            st.session_state['fallback'] = FALLBACK
+            st.session_state['sql']     = None
+            st.session_state['df']      = None
+            st.session_state['summary'] = None
+            st.session_state['error']   = None
+        else:
+            with st.spinner('Generating SQL...'):
+                sql = generate_sql(question, client, schema, idx, chunks, sources)
 
-    question = question.strip()
-    if not question or question.upper() == 'YOUR QUESTION HERE':
-        st.warning('Please enter a question.')
-        return
-    if len(question) < 10:
-        st.markdown(f'<div class="fallback-block">{FALLBACK}</div>', unsafe_allow_html=True)
-        return
+            valid, reason = validate_sql(sql)
+            if not valid:
+                st.session_state['fallback'] = f'{FALLBACK}<br><br><small>{reason}</small>'
+                st.session_state['sql']      = sql
+                st.session_state['df']       = None
+                st.session_state['summary']  = None
+                st.session_state['error']    = None
+            else:
+                with st.spinner('Running query...'):
+                    try:
+                        df = run_sql(sql)
+                        st.session_state['error'] = None
+                    except RuntimeError as e:
+                        st.session_state['error']   = str(e)
+                        st.session_state['df']      = None
+                        st.session_state['summary'] = None
+                        st.session_state['sql']     = sql
+                        st.session_state['fallback']= None
+                        df = None
 
-    with st.spinner('Generating SQL...'):
-        sql = generate_sql(question, client, schema, idx, chunks, sources)
+                if df is not None:
+                    if df.empty:
+                        st.session_state['df']      = df
+                        st.session_state['summary'] = None
+                    else:
+                        with st.spinner('Interpreting results...'):
+                            summary = generate_summary(df, question, client)
+                        st.session_state['df']      = df
+                        st.session_state['summary'] = summary
+                    st.session_state['sql']      = sql
+                    st.session_state['fallback'] = None
 
-    valid, reason = validate_sql(sql)
-    if not valid:
-        st.markdown(f'<div class="fallback-block">{FALLBACK}<br><br><small>{reason}</small></div>', unsafe_allow_html=True)
-        st.markdown('**Generated SQL (for debugging):**')
-        st.markdown(f'<div class="sql-block">{sql}</div>', unsafe_allow_html=True)
-        return
+    # ── Render stored results ─────────────────────────────────────────────────
+    if st.session_state['fallback']:
+        st.markdown(
+            f'<div class="fallback-block">{st.session_state["fallback"]}</div>',
+            unsafe_allow_html=True
+        )
+        if st.session_state['sql']:
+            with st.expander('Generated SQL (debugging)', expanded=False):
+                st.markdown(
+                    f'<div class="sql-block">{st.session_state["sql"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-    # Show SQL
-    with st.expander('Generated SQL', expanded=False):
-        st.markdown(f'<div class="sql-block">{sql}</div>', unsafe_allow_html=True)
+    elif st.session_state['error']:
+        st.error(st.session_state['error'])
 
-    # Execute
-    with st.spinner('Running query...'):
-        try:
-            df = run_sql(sql)
-        except RuntimeError as e:
-            st.error(str(e))
-            return
+    elif st.session_state['df'] is not None:
+        df = st.session_state['df']
 
-    if df.empty:
-        st.info('Query returned no results.')
-        return
+        # SQL expander
+        if st.session_state['sql']:
+            with st.expander('Generated SQL', expanded=False):
+                st.markdown(
+                    f'<div class="sql-block">{st.session_state["sql"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-    # Summary
-    with st.spinner('Interpreting results...'):
-        summary = generate_summary(df, question, client)
+        if df.empty:
+            st.info('Query returned no results.')
+        else:
+            # Summary
+            if st.session_state['summary']:
+                st.markdown(
+                    f'<div class="summary-block">{st.session_state["summary"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-    st.markdown(f'<div class="summary-block">{summary}</div>', unsafe_allow_html=True)
+            # Table
+            st.markdown(f'**{len(df):,} rows returned**')
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Table
-    st.markdown(f'**{len(df):,} rows returned**')
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # Download
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label='Download CSV',
-        data=csv,
-        file_name='petdb_results.csv',
-        mime='text/csv',
-    )
+            # Download -- key prevents rerun reset
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label='Download CSV',
+                data=csv,
+                file_name='petdb_results.csv',
+                mime='text/csv',
+                key='download_csv',
+            )
 
 
 if __name__ == '__main__':
