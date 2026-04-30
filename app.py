@@ -21,119 +21,202 @@ st.set_page_config(
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown('''
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&family=DM+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    --teal:      #1a7a6e;
+    --teal-lt:   #e8f4f2;
+    --teal-mid:  #c2e0dc;
+    --ink:       #1c1c1c;
+    --ink-mid:   #4a4a4a;
+    --ink-lt:    #8a8a8a;
+    --border:    #e0e0e0;
+    --bg:        #ffffff;
+    --bg-off:    #f9f9f9;
+    --red-lt:    #fdf2f2;
+    --red:       #b94040;
+}
 
 html, body, [class*="css"] {
-    font-family: "DM Sans", sans-serif;
+    font-family: 'Inter', sans-serif;
+    background: var(--bg) !important;
+    color: var(--ink);
 }
 
-.main { background: #f7f6f2; }
-
-h1, h2, h3 { font-family: "DM Serif Display", serif; }
-
-.stTextArea textarea {
-    font-family: "DM Sans", sans-serif !important;
-    font-size: 15px !important;
-    border: 2px solid #0E2841 !important;
-    border-radius: 8px !important;
-    background: #fff !important;
-    padding: 14px !important;
+.block-container {
+    max-width: 900px !important;
+    padding-top: 2.5rem !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
 }
 
-.stButton > button {
-    background: #0E2841 !important;
-    color: #fff !important;
-    font-family: "DM Sans", sans-serif !important;
-    font-weight: 600 !important;
-    font-size: 15px !important;
-    border-radius: 8px !important;
-    border: none !important;
-    padding: 0.6rem 2rem !important;
-    transition: background 0.2s ease;
+/* Header */
+.app-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.4rem;
+    margin-bottom: 2rem;
 }
-.stButton > button:hover {
-    background: #156082 !important;
+.app-header h1 {
+    font-family: 'Source Serif 4', serif;
+    font-weight: 600;
+    font-size: 1.9rem;
+    color: var(--ink);
+    margin: 0 0 0.25rem 0;
+    letter-spacing: -0.02em;
 }
-
-.sql-block {
-    background: #0E2841;
-    color: #e8e8e8;
-    font-family: "DM Mono", monospace;
-    font-size: 13px;
-    padding: 16px 20px;
-    border-radius: 8px;
-    white-space: pre-wrap;
-    margin-bottom: 1rem;
+.app-header p {
+    font-size: 13.5px;
+    color: var(--ink-lt);
+    margin: 0;
+    font-weight: 300;
 }
-
-.summary-block {
-    background: #fff;
-    border-left: 4px solid #E97132;
-    padding: 16px 20px;
-    border-radius: 0 8px 8px 0;
-    font-size: 15px;
-    color: #1a1a1a;
-    margin-bottom: 1rem;
+.teal-rule {
+    width: 40px;
+    height: 3px;
+    background: var(--teal);
+    border-radius: 2px;
+    margin-top: 0.9rem;
 }
 
-.fallback-block {
-    background: #fff3f0;
-    border-left: 4px solid #c0392b;
-    padding: 14px 18px;
-    border-radius: 0 8px 8px 0;
-    font-size: 14px;
-    color: #7b2020;
-}
-
+/* Stat row */
 .stat-row {
     display: flex;
-    gap: 1rem;
-    margin-bottom: 1.2rem;
+    gap: 0px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 1.8rem;
 }
 .stat-card {
-    background: #0E2841;
-    color: #fff;
-    border-radius: 8px;
-    padding: 14px 20px;
-    min-width: 130px;
-    text-align: center;
+    flex: 1;
+    padding: 14px 18px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-off);
 }
+.stat-card:last-child { border-right: none; }
 .stat-card .val {
-    font-size: 26px;
-    font-weight: 700;
-    color: #E97132;
-    font-family: "DM Serif Display", serif;
+    font-family: 'Source Serif 4', serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--teal);
+    display: block;
 }
 .stat-card .lbl {
     font-size: 11px;
-    color: #8A9BB0;
+    color: var(--ink-lt);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     margin-top: 2px;
+    display: block;
 }
 
-.header-band {
-    background: #0E2841;
-    color: #fff;
-    padding: 2rem 2.5rem 1.5rem;
-    border-radius: 12px;
-    margin-bottom: 2rem;
+/* Textarea */
+.stTextArea textarea {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 14px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 4px !important;
+    background: var(--bg) !important;
+    padding: 12px 14px !important;
+    color: var(--ink) !important;
+    box-shadow: none !important;
+    transition: border 0.15s ease;
 }
-.header-band h1 {
-    margin: 0 0 0.3rem 0;
-    font-size: 2.2rem;
-    color: #fff;
+.stTextArea textarea:focus {
+    border: 1px solid var(--teal) !important;
+    box-shadow: 0 0 0 3px rgba(26,122,110,0.08) !important;
 }
-.header-band p {
-    margin: 0;
-    color: #8A9BB0;
-    font-size: 15px;
+
+/* Button */
+.stButton > button {
+    background: var(--teal) !important;
+    color: #fff !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 14px !important;
+    border-radius: 4px !important;
+    border: none !important;
+    padding: 0.5rem 1.6rem !important;
+    letter-spacing: 0.01em;
+    transition: background 0.15s ease;
 }
-.orange-line {
-    height: 4px;
-    background: #E97132;
-    border-radius: 2px;
-    margin: 0.8rem 0 0;
-    width: 60px;
+.stButton > button:hover {
+    background: #155f55 !important;
 }
+
+/* Download button */
+.stDownloadButton > button {
+    background: var(--bg) !important;
+    color: var(--teal) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    border: 1px solid var(--teal) !important;
+    border-radius: 4px !important;
+    padding: 0.4rem 1.2rem !important;
+    transition: all 0.15s ease;
+}
+.stDownloadButton > button:hover {
+    background: var(--teal-lt) !important;
+}
+
+/* SQL block */
+.sql-block {
+    background: #f6f8f7;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    color: #2a2a2a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    padding: 14px 18px;
+    border-radius: 0 4px 4px 0;
+    white-space: pre-wrap;
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
+
+/* Summary block */
+.summary-block {
+    background: var(--teal-lt);
+    border-left: 3px solid var(--teal);
+    padding: 14px 18px;
+    border-radius: 0 4px 4px 0;
+    font-size: 14px;
+    color: var(--ink);
+    margin-bottom: 1.2rem;
+    line-height: 1.65;
+}
+
+/* Fallback block */
+.fallback-block {
+    background: var(--red-lt);
+    border-left: 3px solid var(--red);
+    padding: 12px 16px;
+    border-radius: 0 4px 4px 0;
+    font-size: 13.5px;
+    color: var(--red);
+    line-height: 1.55;
+}
+
+/* Section label */
+.section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-lt);
+    margin-bottom: 0.5rem;
+}
+
+/* Row count */
+.row-count {
+    font-size: 12px;
+    color: var(--ink-lt);
+    margin-bottom: 0.5rem;
+}
+
+/* Divider */
+hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 </style>
 ''', unsafe_allow_html=True)
 
@@ -413,10 +496,10 @@ def main():
 
     # Header
     st.markdown('''
-    <div class="header-band">
-        <h1>🌋 PetDB Query</h1>
-        <p>Natural language querying of back-arc basin geochemical data</p>
-        <div class="orange-line"></div>
+    <div class="app-header">
+        <h1>PetDB Query</h1>
+        <p>Natural language querying of back-arc basin geochemical data &nbsp;·&nbsp; Hofmann (2003) RAG &nbsp;·&nbsp; Groq qwen3-32b</p>
+        <div class="teal-rule"></div>
     </div>
     ''', unsafe_allow_html=True)
 
@@ -439,10 +522,10 @@ def main():
     # Stats row
     st.markdown(f'''
     <div class="stat-row">
-        <div class="stat-card"><div class="val">10,581</div><div class="lbl">samples</div></div>
-        <div class="stat-card"><div class="val">{basins}</div><div class="lbl">basins</div></div>
-        <div class="stat-card"><div class="val">62</div><div class="lbl">retained columns</div></div>
-        <div class="stat-card"><div class="val">1</div><div class="lbl">RAG document</div></div>
+        <div class="stat-card"><span class="val">10,581</span><span class="lbl">Samples</span></div>
+        <div class="stat-card"><span class="val">{basins}</span><span class="lbl">Basins</span></div>
+        <div class="stat-card"><span class="val">62</span><span class="lbl">Retained columns</span></div>
+        <div class="stat-card"><span class="val">1</span><span class="lbl">RAG document</span></div>
     </div>
     ''', unsafe_allow_html=True)
 
@@ -452,9 +535,7 @@ def main():
         st.dataframe(cat_df, use_container_width=True, hide_index=True)
 
     st.markdown('---')
-
-    # Query input
-    st.markdown('#### Ask a question')
+    st.markdown('<div class="section-label">Query</div>', unsafe_allow_html=True)
     question = st.text_area(
         label='question',
         label_visibility='collapsed',
@@ -549,7 +630,7 @@ def main():
                 )
 
             # Table
-            st.markdown(f'**{len(df):,} rows returned**')
+            st.markdown(f'<div class="row-count">{len(df):,} rows returned</div>', unsafe_allow_html=True)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
             # Download -- key prevents rerun reset
