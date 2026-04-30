@@ -267,7 +267,9 @@ SUMMARY_SYSTEM = (
     'You are a geochemist interpreting query results from a PetDB back-arc basin basalt database. '
     'Write a concise 2-3 sentence interpretation of the data returned. '
     'Be specific about values, patterns, and what they mean geochemically. '
-    'Do not mention SQL, databases, or technical details. Write for a geoscience audience.'
+    'Do not mention SQL, databases, or technical details. Write for a geoscience audience. '
+    'If the result contains multiple distinct groups, basins, or categories worth comparing, '
+    'use bullet points (one per key finding). Otherwise write in prose.'
 )
 
 # ── Cached resources ──────────────────────────────────────────────────────────
@@ -402,7 +404,21 @@ def run_sql(sql):
     return df
 
 
-def generate_summary(df, question, client):
+def generate_filename(question, client):
+    '''Ask the model for a short snake_case filename based on the question.'''
+    messages = [
+        {'role': 'system', 'content': (
+            '/no-think\n'
+            'Generate a short snake_case filename (no extension, max 5 words, no stopwords) '
+            'that describes the geochemical query. Return only the filename, nothing else.'
+        )},
+        {'role': 'user', 'content': question},
+    ]
+    raw = call_groq(client, messages, max_tokens=20, temperature=0.0)
+    # sanitize: keep only alphanumeric and underscores
+    name = re.sub(r'[^a-z0-9_]', '_', raw.lower().strip())
+    name = re.sub(r'_+', '_', name).strip('_')
+    return f'{name}.csv' if name else 'petdb_results.csv'
     preview = df.head(20).to_string(index=False)
     messages = [
         {'role': 'system', 'content': SUMMARY_SYSTEM},
@@ -490,7 +506,7 @@ COLUMN_CATALOGUE = [
 # ── App ───────────────────────────────────────────────────────────────────────
 def main():
     # Session state init
-    for key in ['sql', 'df', 'summary', 'error', 'fallback']:
+    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename']:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -498,7 +514,7 @@ def main():
     st.markdown('''
     <div class="app-header">
         <h1>PetDB Query</h1>
-        <p>Natural language querying of back-arc basin geochemical data &nbsp;·&nbsp; Hofmann (2003) RAG &nbsp;·&nbsp; Groq qwen3-32b</p>
+        <p>Natural language querying of geochemical data</p>
         <div class="teal-rule"></div>
     </div>
     ''', unsafe_allow_html=True)
@@ -533,6 +549,8 @@ def main():
     with st.expander(f'View all 62 retained columns', expanded=False):
         cat_df = pd.DataFrame(COLUMN_CATALOGUE, columns=['Column', 'Unit', 'Description'])
         st.dataframe(cat_df, use_container_width=True, hide_index=True)
+
+    st.caption('Note: not all fields are populated for every sample. Coverage ranges from ~32% for major oxides to 5-8% for isotope ratios. Queries will only return rows where the requested columns have values.')
 
     st.markdown('---')
     st.markdown('<div class="section-label">Query</div>', unsafe_allow_html=True)
@@ -582,13 +600,16 @@ def main():
 
                 if df is not None:
                     if df.empty:
-                        st.session_state['df']      = df
-                        st.session_state['summary'] = None
+                        st.session_state['df']       = df
+                        st.session_state['summary']  = None
+                        st.session_state['filename'] = 'petdb_results.csv'
                     else:
                         with st.spinner('Interpreting results...'):
-                            summary = generate_summary(df, question, client)
-                        st.session_state['df']      = df
-                        st.session_state['summary'] = summary
+                            summary  = generate_summary(df, question, client)
+                            filename = generate_filename(question, client)
+                        st.session_state['df']       = df
+                        st.session_state['summary']  = summary
+                        st.session_state['filename'] = filename
                     st.session_state['sql']      = sql
                     st.session_state['fallback'] = None
 
@@ -635,10 +656,11 @@ def main():
 
             # Download -- key prevents rerun reset
             csv = df.to_csv(index=False).encode('utf-8')
+            filename = st.session_state.get('filename', 'petdb_results.csv')
             st.download_button(
                 label='Download CSV',
                 data=csv,
-                file_name='petdb_results.csv',
+                file_name=filename,
                 mime='text/csv',
                 key='download_csv',
             )
