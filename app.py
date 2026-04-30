@@ -414,6 +414,19 @@ def run_sql(sql):
     return df
 
 
+def generate_summary(df, question, client):
+    preview = df.head(20).to_string(index=False)
+    messages = [
+        {'role': 'system', 'content': SUMMARY_SYSTEM},
+        {'role': 'user', 'content': (
+            f'Question asked: {question}\n\n'
+            f'Query returned {len(df)} rows. Here is a preview:\n\n{preview}\n\n'
+            f'Write a 2-3 sentence geochemical interpretation.'
+        )},
+    ]
+    return call_groq(client, messages, max_tokens=200, temperature=0.3)
+
+
 def generate_filename(question, client):
     '''Ask the model for a short snake_case filename based on the question.'''
     messages = [
