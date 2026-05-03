@@ -294,14 +294,25 @@ VALID_COLUMNS = {
 FALLBACK = 'This question cannot be answered from the PetDB back-arc basin dataset.'
 
 ROUTE_EXPAND_SYSTEM = (
-    'You are a query router for a geochemical database. Given a question, respond with JSON only.\n'
-    'If the question is "operational" (pure data retrieval or aggregation — averages, counts, '
-    'filters, rankings, numeric comparisons), return:\n'
-    '{"route": "operational"}\n'
-    'If the question is "conceptual" (requires geochemical knowledge — tectonic settings, '
-    'isotope systematics, mantle processes, petrogenetic interpretation), return:\n'
-    '{"route": "conceptual", "expanded": "<dense scientific phrase for literature search>"}\n'
-    'Return valid JSON only. No explanation.'
+    'You are a query router for a geochemical sample database (PetDB) containing back-arc basin '
+    'basalt samples. Available columns include: major oxides (SiO2, TiO2, Al2O3, FeOt, MgO, MnO, '
+    'CaO, Na2O, K2O, P2O5), trace elements (Rb, Sr, Ba, Nb, Ta, Zr, Hf, Y, Th, U, Pb, V, Cr, '
+    'Co, Ni, Sc, and all REE), isotope ratios (Sr, Nd, Pb), and metadata (basin, tectonic setting, '
+    'location, rock texture, geologic age).\n\n'
+    'Given a question, respond with JSON only — no explanation.\n\n'
+    'Mark "out_of_scope" ONLY if the question references something with NO possible mapping to any '
+    'column above — e.g. tourism/vacation, elements absent from the database (gold, silver, '
+    'platinum, copper, zinc), market prices, calendar dates, or topics entirely unrelated to '
+    'igneous petrology. Geochemical rock classifications (tholeiite, alkali basalt, MORB, OIB, '
+    'boninite, etc.) ARE answerable using existing chemistry columns and must NOT be out_of_scope.\n'
+    '{"route": "out_of_scope"}\n\n'
+    'Mark "operational" if answerable by filtering, aggregating, or classifying samples using '
+    'existing columns — including rock type classifications computed from chemistry:\n'
+    '{"route": "operational"}\n\n'
+    'Mark "conceptual" if the question requires geochemical background to interpret results — '
+    'mantle source characteristics, isotope systematics, tectonic petrogenesis:\n'
+    '{"route": "conceptual", "expanded": "<dense scientific phrase for literature search>"}\n\n'
+    'Return valid JSON only.'
 )
 
 SYSTEM_PROMPT = (
@@ -706,6 +717,15 @@ def main():
                 st.session_state['route']    = route
                 st.session_state['expanded'] = expanded
 
+                if route == 'out_of_scope':
+                    st.session_state['fallback'] = FALLBACK
+                    st.session_state['sql']      = None
+                    st.session_state['thinking'] = None
+                    st.session_state['df']       = None
+                    st.session_state['summary']  = None
+                    st.session_state['error']    = None
+                    st.rerun()
+
                 context = None
                 if route == 'conceptual':
                     with st.spinner('Retrieving context...'):
@@ -788,7 +808,7 @@ def main():
                     f'<div class="expanded-query">Search query: {st.session_state["expanded"]}</div>',
                     unsafe_allow_html=True
                 )
-        elif route == 'operational':
+        elif route in ('operational', None):
             st.markdown('<span class="badge badge-operational">Operational · No RAG</span>', unsafe_allow_html=True)
 
         # Thinking expander
