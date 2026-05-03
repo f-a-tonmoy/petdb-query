@@ -1,7 +1,10 @@
+import json
 import os
 import re
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
 
 import chromadb
 import numpy as np
@@ -261,20 +264,15 @@ VALID_COLUMNS = {
 
 FALLBACK = 'This question cannot be answered from the PetDB back-arc basin dataset.'
 
-ROUTE_SYSTEM = (
-    'Classify the following geochemical database question as either:\n'
-    '- "operational": purely data retrieval or aggregation (averages, counts, filters, '
-    'rankings, numeric comparisons, listing samples by column values)\n'
-    '- "conceptual": requires understanding geochemical concepts, tectonic settings, '
-    'isotope systematics, mantle processes, or petrogenetic interpretation\n'
-    'Return ONLY one word: operational or conceptual.'
-)
-
-EXPAND_SYSTEM = (
-    'You are a geochemist. Rewrite the following question into a dense scientific phrase '
-    'using geochemical terminology suitable for searching academic literature on mantle '
-    'geochemistry, oceanic basalts, isotope systematics, and trace element behavior. '
-    'Return ONLY the expanded phrase, no explanation, no sentence structure.'
+ROUTE_EXPAND_SYSTEM = (
+    'You are a query router for a geochemical database. Given a question, respond with JSON only.\n'
+    'If the question is "operational" (pure data retrieval or aggregation — averages, counts, '
+    'filters, rankings, numeric comparisons), return:\n'
+    '{"route": "operational"}\n'
+    'If the question is "conceptual" (requires geochemical knowledge — tectonic settings, '
+    'isotope systematics, mantle processes, petrogenetic interpretation), return:\n'
+    '{"route": "conceptual", "expanded": "<dense scientific phrase for literature search>"}\n'
+    'Return valid JSON only. No explanation.'
 )
 
 SYSTEM_PROMPT = (
@@ -291,6 +289,8 @@ SYSTEM_PROMPT = (
     '- Computed ratios must guard against division by zero with a WHERE clause.\n'
     '- Only query columns that exist in the schema. Never invent proxies for real-world '
     'data like prices, dates, or external measurements not present in the database.\n'
+    '- Format the SQL with uppercase keywords, each clause (SELECT, FROM, WHERE, GROUP BY, ORDER BY) '
+    'on its own line, and selected columns indented on separate lines.\n'
 )
 
 SUMMARY_SYSTEM = (
@@ -360,21 +360,24 @@ def retrieve(query, collection, k=TOP_K):
     ]
 
 
-def route_query(question, client):
+def route_and_expand(question, client):
+    """Single call: classify question and expand if conceptual.
+    Returns (route, expanded_query_or_None).
+    """
     messages = [
-        {'role': 'system', 'content': ROUTE_SYSTEM},
+        {'role': 'system', 'content': ROUTE_EXPAND_SYSTEM},
         {'role': 'user',   'content': question},
     ]
-    raw = call_deepseek(client, messages, max_tokens=5, temperature=0.0)
-    return 'conceptual' if 'concept' in raw.lower() else 'operational'
-
-
-def expand_query(question, client):
-    messages = [
-        {'role': 'system', 'content': EXPAND_SYSTEM},
-        {'role': 'user',   'content': question},
-    ]
-    return call_deepseek(client, messages, max_tokens=80, temperature=0.2)
+    raw = call_deepseek(client, messages, max_tokens=120, temperature=0.0)
+    raw = re.sub(r'```[a-z]*\n?', '', raw).strip('` \n')
+    try:
+        data = json.loads(raw)
+        route    = data.get('route', 'operational')
+        expanded = data.get('expanded', None)
+    except Exception:
+        route    = 'conceptual' if 'concept' in raw.lower() else 'operational'
+        expanded = None
+    return route, expanded
 
 
 def build_prompt(question, schema, context=None):
@@ -429,6 +432,11 @@ def generate_sql(question, client, schema, context=None):
     sql = re.sub(r'^```[\w]*\n?', '', raw)
     sql = re.sub(r'\n?```$', '', sql)
     return sql.strip(), thinking
+
+
+@st.cache_data(show_spinner=False)
+def cached_generate_sql(_client, question, schema, context):
+    return generate_sql(question, _client, schema, context)
 
 
 def validate_sql(sql):
@@ -664,21 +672,19 @@ def main():
         else:
             try:
                 with st.spinner('Routing query...'):
-                    route = route_query(question, client)
+                    route, expanded = route_and_expand(question, client)
 
                 context = None
                 if route == 'conceptual':
-                    with st.spinner('Expanding query...'):
-                        expanded = expand_query(question, client)
                     with st.spinner('Retrieving context...'):
-                        hits    = retrieve(expanded, collection)
+                        hits    = retrieve(expanded or question, collection)
                         context = '\n\n'.join(
                             f'[{h["source"]}]\n{" ".join(h["chunk"].split()[:CHUNK_WORD_LIMIT])}'
                             for h in hits
                         )
 
                 with st.spinner('Generating SQL...'):
-                    sql, thinking = generate_sql(question, client, schema, context)
+                    sql, thinking = cached_generate_sql(client, question, schema, context)
             except RateLimitError:
                 st.session_state['fallback'] = 'Rate limit reached. Please wait a minute and try again.'
                 st.session_state['sql'] = st.session_state['df'] = st.session_state['summary'] = None
@@ -713,8 +719,11 @@ def main():
                     else:
                         try:
                             with st.spinner('Interpreting results...'):
-                                summary  = generate_summary(df, question, client)
-                                filename = generate_filename(question, client)
+                                with ThreadPoolExecutor(max_workers=2) as ex:
+                                    f_summary  = ex.submit(generate_summary, df, question, client)
+                                    f_filename = ex.submit(generate_filename, question, client)
+                                summary  = f_summary.result()
+                                filename = f_filename.result()
                         except RateLimitError:
                             summary  = None
                             filename = 'petdb_results.csv'
