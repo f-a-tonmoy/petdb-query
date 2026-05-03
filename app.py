@@ -217,6 +217,35 @@ html, body, [class*="css"] {
     margin-bottom: 0.5rem;
 }
 
+/* Route badge */
+.badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 1rem;
+}
+.badge-operational {
+    background: #eef2ff;
+    color: #4356a0;
+    border: 1px solid #c7d0f5;
+}
+.badge-conceptual {
+    background: var(--teal-lt);
+    color: var(--teal);
+    border: 1px solid var(--teal-mid);
+}
+.expanded-query {
+    font-size: 12px;
+    color: var(--ink-lt);
+    margin-top: -0.6rem;
+    margin-bottom: 1rem;
+    font-style: italic;
+}
+
 /* Thinking block */
 .thinking-block {
     background: #f5f5f5;
@@ -601,7 +630,7 @@ COLUMN_CATALOGUE = [
 # ── App ───────────────────────────────────────────────────────────────────────
 def main():
     # Session state init
-    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename', 'thinking']:
+    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename', 'thinking', 'route', 'expanded']:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -673,6 +702,9 @@ def main():
             try:
                 with st.spinner('Routing query...'):
                     route, expanded = route_and_expand(question, client)
+
+                st.session_state['route']    = route
+                st.session_state['expanded'] = expanded
 
                 context = None
                 if route == 'conceptual':
@@ -746,6 +778,18 @@ def main():
 
     elif st.session_state['df'] is not None:
         df = st.session_state['df']
+
+        # Route badge
+        route = st.session_state.get('route')
+        if route == 'conceptual':
+            st.markdown('<span class="badge badge-conceptual">RAG · Conceptual</span>', unsafe_allow_html=True)
+            if st.session_state.get('expanded'):
+                st.markdown(
+                    f'<div class="expanded-query">Search query: {st.session_state["expanded"]}</div>',
+                    unsafe_allow_html=True
+                )
+        elif route == 'operational':
+            st.markdown('<span class="badge badge-operational">Operational · No RAG</span>', unsafe_allow_html=True)
 
         # Thinking expander
         if st.session_state.get('thinking'):
