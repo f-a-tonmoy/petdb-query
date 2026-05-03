@@ -7,7 +7,7 @@ import chromadb
 import numpy as np
 import pandas as pd
 import streamlit as st
-from groq import Groq
+from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -214,6 +214,21 @@ html, body, [class*="css"] {
     margin-bottom: 0.5rem;
 }
 
+/* Thinking block */
+.thinking-block {
+    background: #f5f5f5;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--ink-lt);
+    color: var(--ink-mid);
+    font-family: 'Inter', sans-serif;
+    font-size: 12.5px;
+    padding: 14px 18px;
+    border-radius: 0 4px 4px 0;
+    white-space: pre-wrap;
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
+
 /* Divider */
 hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 </style>
@@ -225,8 +240,8 @@ SCHEMA_PATH    = 'petdb_schema.txt'
 CACHE_DIR      = Path('cache')
 CHROMA_PATH    = CACHE_DIR / 'chroma'
 COLLECTION     = 'petdb_rag'
-EMBED_MODEL_ID = 'sentence-transformers/all-MiniLM-L6-v2'
-GROQ_MODEL_ID  = 'qwen/qwen3-32b'
+EMBED_MODEL_ID    = 'sentence-transformers/all-MiniLM-L6-v2'
+DEEPSEEK_MODEL_ID = 'deepseek-v4-flash'
 TOP_K              = 2
 CHUNK_WORD_LIMIT   = 200
 CACHE_DIR.mkdir(exist_ok=True)
@@ -247,7 +262,6 @@ VALID_COLUMNS = {
 FALLBACK = 'This question cannot be answered from the PetDB back-arc basin dataset.'
 
 ROUTE_SYSTEM = (
-    '/no-think\n'
     'Classify the following geochemical database question as either:\n'
     '- "operational": purely data retrieval or aggregation (averages, counts, filters, '
     'rankings, numeric comparisons, listing samples by column values)\n'
@@ -257,7 +271,6 @@ ROUTE_SYSTEM = (
 )
 
 EXPAND_SYSTEM = (
-    '/no-think\n'
     'You are a geochemist. Rewrite the following question into a dense scientific phrase '
     'using geochemical terminology suitable for searching academic literature on mantle '
     'geochemistry, oceanic basalts, isotope systematics, and trace element behavior. '
@@ -265,10 +278,10 @@ EXPAND_SYSTEM = (
 )
 
 SYSTEM_PROMPT = (
-    '/no-think\n'
     'You are a geochemist and SQLite expert. '
     'Given a database schema, geochemical context, and a natural language question, '
     'you generate a single valid SQLite query that answers the question. '
+    'When reasoning, be concise — use short bullet points, no repetition, no restating the question. '
     'Rules:\n'
     '- Return ONLY the SQL query, no explanation, no markdown, no code fences.\n'
     '- Always filter out NULL values with IS NOT NULL when operating on geochemical columns.\n'
@@ -281,7 +294,6 @@ SYSTEM_PROMPT = (
 )
 
 SUMMARY_SYSTEM = (
-    '/no-think\n'
     'You are a geochemist interpreting query results from a PetDB back-arc basin basalt database. '
     'Write a concise 2-3 sentence interpretation of the data returned. '
     'Be specific about values, patterns, and what they mean geochemically. '
@@ -353,7 +365,7 @@ def route_query(question, client):
         {'role': 'system', 'content': ROUTE_SYSTEM},
         {'role': 'user',   'content': question},
     ]
-    raw = call_groq(client, messages, max_tokens=5, temperature=0.0)
+    raw = call_deepseek(client, messages, max_tokens=5, temperature=0.0)
     return 'conceptual' if 'concept' in raw.lower() else 'operational'
 
 
@@ -362,7 +374,7 @@ def expand_query(question, client):
         {'role': 'system', 'content': EXPAND_SYSTEM},
         {'role': 'user',   'content': question},
     ]
-    return call_groq(client, messages, max_tokens=80, temperature=0.2)
+    return call_deepseek(client, messages, max_tokens=80, temperature=0.2)
 
 
 def build_prompt(question, schema, context=None):
@@ -381,8 +393,13 @@ def build_prompt(question, schema, context=None):
     ]
 
 
-def call_groq(client, messages, max_tokens, temperature):
-    kwargs = dict(model=GROQ_MODEL_ID, messages=messages, max_tokens=max_tokens)
+def call_deepseek(client, messages, max_tokens, temperature, thinking=False):
+    kwargs = dict(
+        model=DEEPSEEK_MODEL_ID,
+        messages=messages,
+        max_tokens=max_tokens,
+        extra_body={'thinking': {'type': 'enabled' if thinking else 'disabled'}},
+    )
     if temperature > 0:
         kwargs['temperature'] = temperature
     try:
@@ -392,9 +409,14 @@ def call_groq(client, messages, max_tokens, temperature):
         if 'rate limit' in msg or '429' in msg or 'too many requests' in msg:
             raise RateLimitError()
         raise
-    raw = response.choices[0].message.content.strip()
-    raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
-    return raw
+    msg     = response.choices[0].message
+    content = msg.content.strip()
+    reasoning = getattr(msg, 'reasoning_content', None)
+    if reasoning:
+        reasoning = reasoning.strip() or None
+    if thinking:
+        return content, reasoning
+    return content
 
 
 class RateLimitError(Exception):
@@ -403,10 +425,10 @@ class RateLimitError(Exception):
 
 def generate_sql(question, client, schema, context=None):
     messages = build_prompt(question, schema, context)
-    raw = call_groq(client, messages, max_tokens=512, temperature=0.1)
+    raw, thinking = call_deepseek(client, messages, max_tokens=2048, temperature=0.1, thinking=True)
     sql = re.sub(r'^```[\w]*\n?', '', raw)
     sql = re.sub(r'\n?```$', '', sql)
-    return sql.strip()
+    return sql.strip(), thinking
 
 
 def validate_sql(sql):
@@ -478,7 +500,7 @@ def generate_summary(df, question, client):
             f'Write a 2-3 sentence geochemical interpretation.'
         )},
     ]
-    return call_groq(client, messages, max_tokens=200, temperature=0.3)
+    return call_deepseek(client, messages, max_tokens=200, temperature=0.3)
 
 
 def generate_filename(question, client):
@@ -490,7 +512,7 @@ def generate_filename(question, client):
         )},
         {'role': 'user', 'content': question},
     ]
-    raw = call_groq(client, messages, max_tokens=20, temperature=0.0)
+    raw = call_deepseek(client, messages, max_tokens=20, temperature=0.0)
     name = re.sub(r'[^a-z0-9_]', '_', raw.lower().strip())
     name = re.sub(r'_+', '_', name).strip('_')
     return f'{name}.csv' if name else 'petdb_results.csv'
@@ -571,7 +593,7 @@ COLUMN_CATALOGUE = [
 # ── App ───────────────────────────────────────────────────────────────────────
 def main():
     # Session state init
-    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename']:
+    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename', 'thinking']:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -584,15 +606,15 @@ def main():
     </div>
     ''', unsafe_allow_html=True)
 
-    # Groq client
+    # DeepSeek client
     try:
-        groq_key = st.secrets['GROQ_API_KEY']
+        deepseek_key = st.secrets['DEEPSEEK_API_KEY']
     except Exception:
-        groq_key = os.environ.get('GROQ_API_KEY', '')
-    if not groq_key:
-        st.error('GROQ_API_KEY not found. Add it to .streamlit/secrets.toml')
+        deepseek_key = os.environ.get('DEEPSEEK_API_KEY', '')
+    if not deepseek_key:
+        st.error('DEEPSEEK_API_KEY not found. Add it to .streamlit/secrets.toml')
         st.stop()
-    client = Groq(api_key=groq_key)
+    client = OpenAI(api_key=deepseek_key, base_url='https://api.deepseek.com')
 
     # Load resources
     load_embedder()          # warm the embedder cache
@@ -656,7 +678,7 @@ def main():
                         )
 
                 with st.spinner('Generating SQL...'):
-                    sql = generate_sql(question, client, schema, context)
+                    sql, thinking = generate_sql(question, client, schema, context)
             except RateLimitError:
                 st.session_state['fallback'] = 'Rate limit reached. Please wait a minute and try again.'
                 st.session_state['sql'] = st.session_state['df'] = st.session_state['summary'] = None
@@ -666,6 +688,7 @@ def main():
             if not valid:
                 st.session_state['fallback'] = FALLBACK
                 st.session_state['sql']      = sql
+                st.session_state['thinking'] = thinking
                 st.session_state['df']       = None
                 st.session_state['summary']  = None
                 st.session_state['error']    = None
@@ -699,6 +722,7 @@ def main():
                         st.session_state['summary']  = summary
                         st.session_state['filename'] = filename
                     st.session_state['sql']      = sql
+                    st.session_state['thinking'] = thinking
                     st.session_state['fallback'] = None
 
     # ── Render stored results ─────────────────────────────────────────────────
@@ -713,6 +737,14 @@ def main():
 
     elif st.session_state['df'] is not None:
         df = st.session_state['df']
+
+        # Thinking expander
+        if st.session_state.get('thinking'):
+            with st.expander('Model reasoning', expanded=False):
+                st.markdown(
+                    f'<div class="thinking-block">{st.session_state["thinking"]}</div>',
+                    unsafe_allow_html=True
+                )
 
         # SQL expander
         if st.session_state['sql']:
