@@ -294,23 +294,17 @@ VALID_COLUMNS = {
 FALLBACK = 'This question cannot be answered from the PetDB back-arc basin dataset.'
 
 ROUTE_EXPAND_SYSTEM = (
-    'You are a query router for a geochemical sample database (PetDB) containing back-arc basin '
-    'basalt samples. Available columns include: major oxides (SiO2, TiO2, Al2O3, FeOt, MgO, MnO, '
-    'CaO, Na2O, K2O, P2O5), trace elements (Rb, Sr, Ba, Nb, Ta, Zr, Hf, Y, Th, U, Pb, V, Cr, '
-    'Co, Ni, Sc, and all REE), isotope ratios (Sr, Nd, Pb), and metadata (basin, tectonic setting, '
-    'location, rock texture, geologic age).\n\n'
+    'You are a query router for a geochemical database of back-arc basin basalt samples.\n'
     'Given a question, respond with JSON only — no explanation.\n\n'
-    'Mark "out_of_scope" ONLY if the question references something with NO possible mapping to any '
-    'column above — e.g. tourism/vacation, elements absent from the database (gold, silver, '
-    'platinum, copper, zinc), market prices, calendar dates, or topics entirely unrelated to '
-    'igneous petrology. Geochemical rock classifications (tholeiite, alkali basalt, MORB, OIB, '
-    'boninite, etc.) ARE answerable using existing chemistry columns and must NOT be out_of_scope.\n'
+    'Mark "out_of_scope" ONLY if the question has nothing to do with geochemistry, petrology, '
+    'or earth science — e.g. tourism, cooking, sports, politics, prices, calendar dates:\n'
     '{"route": "out_of_scope"}\n\n'
-    'Mark "operational" if answerable by filtering, aggregating, or classifying samples using '
-    'existing columns — including rock type classifications computed from chemistry:\n'
+    'Mark "operational" for straightforward data retrieval — statistics, filters, rankings, '
+    'and numeric comparisons on existing columns:\n'
     '{"route": "operational"}\n\n'
-    'Mark "conceptual" if the question requires geochemical background to interpret results — '
-    'mantle source characteristics, isotope systematics, tectonic petrogenesis:\n'
+    'Mark "conceptual" if the question requires geochemical knowledge — rock type classification '
+    '(tholeiite, alkali basalt, MORB, OIB, boninite), discrimination diagrams, mantle source '
+    'processes, isotope systematics, or tectonic petrogenesis:\n'
     '{"route": "conceptual", "expanded": "<dense scientific phrase for literature search>"}\n\n'
     'Return valid JSON only.'
 )
@@ -468,7 +462,7 @@ class RateLimitError(Exception):
 
 def generate_sql(question, client, schema, context=None):
     messages = build_prompt(question, schema, context)
-    raw, thinking = call_deepseek(client, messages, max_tokens=2048, temperature=0.1, thinking=True)
+    raw, thinking = call_deepseek(client, messages, max_tokens=8192, temperature=0.1, thinking=True)
     sql = re.sub(r'^```[\w]*\n?', '', raw)
     sql = re.sub(r'\n?```$', '', sql)
     return sql.strip(), thinking
@@ -493,6 +487,10 @@ def validate_sql(sql):
         'over', 'partition', 'iif', 'abs', 'length', 'upper', 'lower',
         'sqrt', 'power', 'substr', 'trim', 'ifnull', 'nullif', 'typeof',
         'integer', 'real', 'text', 'blob', 'numeric', 'true', 'false',
+        'with', 'recursive', 'union', 'all', 'intersect', 'except',
+        'exists', 'any', 'values', 'offset', 'filter', 'window',
+        'rows', 'range', 'unbounded', 'preceding', 'following', 'current',
+        'row', 'ntile', 'lag', 'lead', 'rank', 'dense_rank', 'row_number',
     }
 
     # strip string literals (single-quoted values)
@@ -504,7 +502,12 @@ def validate_sql(sql):
     sql_no_strings = re.sub(r'\bthen\s+[a-z_][a-z0-9_]*', 'then', sql_no_strings)
     sql_no_strings = re.sub(r'\belse\s+[a-z_][a-z0-9_]*', 'else', sql_no_strings)
 
+    # AS alias  (SELECT ... AS foo)
     aliases = set(re.findall(r'\bas\s+([a-z_][a-z0-9_]*)', sql_no_strings))
+    # CTE names  (WITH foo AS (...))
+    aliases |= set(re.findall(r'([a-z_][a-z0-9_]*)\s+as\s*\(', sql_no_strings))
+    # implicit subquery aliases  (... ) foo)
+    aliases |= set(re.findall(r'\)\s+([a-z_][a-z0-9_]*)', sql_no_strings))
     tokens  = re.findall(r'[a-z_][a-z0-9_]*', sql_no_strings)
     unknown = [
         t for t in tokens
@@ -787,6 +790,35 @@ def main():
                     st.session_state['fallback'] = None
 
     # ── Render stored results ─────────────────────────────────────────────────
+
+    # Route badge — always show when a query was attempted
+    route = st.session_state.get('route')
+    if route == 'conceptual':
+        st.markdown('<span class="badge badge-conceptual">RAG · Conceptual</span>', unsafe_allow_html=True)
+        if st.session_state.get('expanded'):
+            st.markdown(
+                f'<div class="expanded-query">Search query: {st.session_state["expanded"]}</div>',
+                unsafe_allow_html=True
+            )
+    elif route in ('operational', None) and st.session_state.get('sql'):
+        st.markdown('<span class="badge badge-operational">Operational · No RAG</span>', unsafe_allow_html=True)
+
+    # Thinking expander — always show when present
+    if st.session_state.get('thinking'):
+        with st.expander('Model reasoning', expanded=False):
+            st.markdown(
+                f'<div class="thinking-block">{st.session_state["thinking"]}</div>',
+                unsafe_allow_html=True
+            )
+
+    # SQL expander — always show when present (even on validation failure)
+    if st.session_state.get('sql'):
+        with st.expander('Generated SQL', expanded=False):
+            st.markdown(
+                f'<div class="sql-block">{st.session_state["sql"]}</div>',
+                unsafe_allow_html=True
+            )
+
     if st.session_state['fallback']:
         st.markdown(
             f'<div class="fallback-block">{st.session_state["fallback"]}</div>',
@@ -798,34 +830,6 @@ def main():
 
     elif st.session_state['df'] is not None:
         df = st.session_state['df']
-
-        # Route badge
-        route = st.session_state.get('route')
-        if route == 'conceptual':
-            st.markdown('<span class="badge badge-conceptual">RAG · Conceptual</span>', unsafe_allow_html=True)
-            if st.session_state.get('expanded'):
-                st.markdown(
-                    f'<div class="expanded-query">Search query: {st.session_state["expanded"]}</div>',
-                    unsafe_allow_html=True
-                )
-        elif route in ('operational', None):
-            st.markdown('<span class="badge badge-operational">Operational · No RAG</span>', unsafe_allow_html=True)
-
-        # Thinking expander
-        if st.session_state.get('thinking'):
-            with st.expander('Model reasoning', expanded=False):
-                st.markdown(
-                    f'<div class="thinking-block">{st.session_state["thinking"]}</div>',
-                    unsafe_allow_html=True
-                )
-
-        # SQL expander
-        if st.session_state['sql']:
-            with st.expander('Generated SQL', expanded=False):
-                st.markdown(
-                    f'<div class="sql-block">{st.session_state["sql"]}</div>',
-                    unsafe_allow_html=True
-                )
 
         if df.empty:
             st.info('Query returned no results.')
