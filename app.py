@@ -246,6 +246,26 @@ html, body, [class*="css"] {
     font-style: italic;
 }
 
+/* Retrieved chunk cards */
+.chunk-card {
+    background: var(--bg-off);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal-mid);
+    border-radius: 0 4px 4px 0;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+    color: var(--ink-mid);
+    line-height: 1.6;
+}
+.chunk-meta {
+    font-size: 11px;
+    color: var(--ink-lt);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+}
+
 /* Thinking block */
 .thinking-block {
     background: #f5f5f5;
@@ -274,7 +294,7 @@ CHROMA_PATH    = CACHE_DIR / 'chroma'
 COLLECTION     = 'petdb_rag'
 EMBED_MODEL_ID    = 'sentence-transformers/all-MiniLM-L6-v2'
 DEEPSEEK_MODEL_ID = 'deepseek-v4-flash'
-TOP_K              = 2
+TOP_K              = 3
 CHUNK_WORD_LIMIT   = 200
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -644,7 +664,7 @@ COLUMN_CATALOGUE = [
 # ── App ───────────────────────────────────────────────────────────────────────
 def main():
     # Session state init
-    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename', 'thinking', 'route', 'expanded']:
+    for key in ['sql', 'df', 'summary', 'error', 'fallback', 'filename', 'thinking', 'route', 'expanded', 'chunks']:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -737,6 +757,9 @@ def main():
                             f'[{h["source"]}]\n{" ".join(h["chunk"].split()[:CHUNK_WORD_LIMIT])}'
                             for h in hits
                         )
+                        st.session_state['chunks'] = hits
+                else:
+                    st.session_state['chunks'] = None
 
                 with st.spinner('Generating SQL...'):
                     sql, thinking = cached_generate_sql(client, question, schema, context)
@@ -800,6 +823,17 @@ def main():
                 f'<div class="expanded-query">Search query: {st.session_state["expanded"]}</div>',
                 unsafe_allow_html=True
             )
+        if st.session_state.get('chunks'):
+            with st.expander('Retrieved context', expanded=False):
+                for h in st.session_state['chunks']:
+                    score_pct = f'{h["score"]*100:.1f}%' if h['score'] else ''
+                    st.markdown(
+                        f'<div class="chunk-card">'
+                        f'<div class="chunk-meta">{h["source"]} · similarity {score_pct}</div>'
+                        f'{" ".join(h["chunk"].split()[:CHUNK_WORD_LIMIT])}'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
     elif route in ('operational', None) and st.session_state.get('sql'):
         st.markdown('<span class="badge badge-operational">Operational · No RAG</span>', unsafe_allow_html=True)
 
