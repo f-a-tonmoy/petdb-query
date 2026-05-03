@@ -1,10 +1,9 @@
 import os
 import re
-import pickle
 import sqlite3
 from pathlib import Path
 
-import faiss
+import chromadb
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -224,11 +223,12 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 DB_PATH        = 'petdb_backarc.sqlite'
 SCHEMA_PATH    = 'petdb_schema.txt'
 CACHE_DIR      = Path('cache')
-FAISS_PATH     = CACHE_DIR / 'rag_index.faiss'
-CHUNKS_PATH    = CACHE_DIR / 'rag_chunks.pkl'
+CHROMA_PATH    = CACHE_DIR / 'chroma'
+COLLECTION     = 'petdb_rag'
 EMBED_MODEL_ID = 'sentence-transformers/all-MiniLM-L6-v2'
 GROQ_MODEL_ID  = 'qwen/qwen3-32b'
-TOP_K          = 3
+TOP_K              = 2
+CHUNK_WORD_LIMIT   = 200
 CACHE_DIR.mkdir(exist_ok=True)
 
 VALID_COLUMNS = {
@@ -245,6 +245,24 @@ VALID_COLUMNS = {
 }
 
 FALLBACK = 'This question cannot be answered from the PetDB back-arc basin dataset.'
+
+ROUTE_SYSTEM = (
+    '/no-think\n'
+    'Classify the following geochemical database question as either:\n'
+    '- "operational": purely data retrieval or aggregation (averages, counts, filters, '
+    'rankings, numeric comparisons, listing samples by column values)\n'
+    '- "conceptual": requires understanding geochemical concepts, tectonic settings, '
+    'isotope systematics, mantle processes, or petrogenetic interpretation\n'
+    'Return ONLY one word: operational or conceptual.'
+)
+
+EXPAND_SYSTEM = (
+    '/no-think\n'
+    'You are a geochemist. Rewrite the following question into a dense scientific phrase '
+    'using geochemical terminology suitable for searching academic literature on mantle '
+    'geochemistry, oceanic basalts, isotope systematics, and trace element behavior. '
+    'Return ONLY the expanded phrase, no explanation, no sentence structure.'
+)
 
 SYSTEM_PROMPT = (
     '/no-think\n'
@@ -279,14 +297,12 @@ def load_embedder():
 
 
 @st.cache_resource(show_spinner='Loading RAG index...')
-def load_rag(_embedder):
-    if not FAISS_PATH.exists() or not CHUNKS_PATH.exists():
-        st.error('RAG cache not found. Please add cache/rag_index.faiss and cache/rag_chunks.pkl to the repo.')
+def load_rag():
+    if not CHROMA_PATH.exists():
+        st.error('ChromaDB not found. Please run build_chroma.ipynb first.')
         st.stop()
-    idx = faiss.read_index(str(FAISS_PATH))
-    with open(CHUNKS_PATH, 'rb') as f:
-        data = pickle.load(f)
-    return idx, data['chunks'], data['sources']
+    client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+    return client.get_collection(COLLECTION)
 
 
 @st.cache_data
@@ -308,26 +324,54 @@ def get_db_stats():
 
 
 # ── Core functions ────────────────────────────────────────────────────────────
-def retrieve(query, idx, all_chunks, chunk_sources, k=TOP_K):
+def retrieve(query, collection, k=TOP_K):
     embedder = load_embedder()
     q_emb = embedder.encode(
         [query], normalize_embeddings=True, convert_to_numpy=True
-    ).astype(np.float32)
-    scores, indices = idx.search(q_emb, k)
+    ).tolist()
+    results = collection.query(
+        query_embeddings=q_emb,
+        n_results=k,
+        include=['documents', 'metadatas', 'distances'],
+    )
     return [
-        {'chunk': all_chunks[i], 'source': chunk_sources[i], 'score': float(s)}
-        for s, i in zip(scores[0], indices[0])
+        {
+            'chunk':  doc,
+            'source': meta.get('source', ''),
+            'score':  1 - dist,
+        }
+        for doc, meta, dist in zip(
+            results['documents'][0],
+            results['metadatas'][0],
+            results['distances'][0],
+        )
     ]
 
 
-def build_prompt(question, schema, idx, all_chunks, chunk_sources):
-    chunks = retrieve(question, idx, all_chunks, chunk_sources)
-    geo_context = '\n\n'.join(
-        f'[{c["source"]}]\n{c["chunk"]}' for c in chunks
+def route_query(question, client):
+    messages = [
+        {'role': 'system', 'content': ROUTE_SYSTEM},
+        {'role': 'user',   'content': question},
+    ]
+    raw = call_groq(client, messages, max_tokens=5, temperature=0.0)
+    return 'conceptual' if 'concept' in raw.lower() else 'operational'
+
+
+def expand_query(question, client):
+    messages = [
+        {'role': 'system', 'content': EXPAND_SYSTEM},
+        {'role': 'user',   'content': question},
+    ]
+    return call_groq(client, messages, max_tokens=80, temperature=0.2)
+
+
+def build_prompt(question, schema, context=None):
+    geo_section = (
+        f'[GEOCHEMICAL CONTEXT]\n{context}\n\n' if context else ''
     )
     user_content = (
         f'[SCHEMA]\n{schema}\n\n'
-        f'[GEOCHEMICAL CONTEXT]\n{geo_context}\n\n'
+        f'{geo_section}'
         f'[QUESTION]\n{question}\n\n'
         f'[SQL]'
     )
@@ -357,8 +401,8 @@ class RateLimitError(Exception):
     pass
 
 
-def generate_sql(question, client, schema, idx, all_chunks, chunk_sources):
-    messages = build_prompt(question, schema, idx, all_chunks, chunk_sources)
+def generate_sql(question, client, schema, context=None):
+    messages = build_prompt(question, schema, context)
     raw = call_groq(client, messages, max_tokens=512, temperature=0.1)
     sql = re.sub(r'^```[\w]*\n?', '', raw)
     sql = re.sub(r'\n?```$', '', sql)
@@ -438,7 +482,6 @@ def generate_summary(df, question, client):
 
 
 def generate_filename(question, client):
-    '''Ask the model for a short snake_case filename based on the question.'''
     messages = [
         {'role': 'system', 'content': (
             '/no-think\n'
@@ -448,20 +491,9 @@ def generate_filename(question, client):
         {'role': 'user', 'content': question},
     ]
     raw = call_groq(client, messages, max_tokens=20, temperature=0.0)
-    # sanitize: keep only alphanumeric and underscores
     name = re.sub(r'[^a-z0-9_]', '_', raw.lower().strip())
     name = re.sub(r'_+', '_', name).strip('_')
     return f'{name}.csv' if name else 'petdb_results.csv'
-    preview = df.head(20).to_string(index=False)
-    messages = [
-        {'role': 'system', 'content': SUMMARY_SYSTEM},
-        {'role': 'user', 'content': (
-            f'Question asked: {question}\n\n'
-            f'Query returned {len(df)} rows. Here is a preview:\n\n{preview}\n\n'
-            f'Write a 2-3 sentence geochemical interpretation.'
-        )},
-    ]
-    return call_groq(client, messages, max_tokens=200, temperature=0.3)
 
 
 # ── Column catalogue ──────────────────────────────────────────────────────────
@@ -563,10 +595,10 @@ def main():
     client = Groq(api_key=groq_key)
 
     # Load resources
-    embedder             = load_embedder()
-    idx, chunks, sources = load_rag(embedder)
-    schema               = load_schema()
-    rows, basins         = get_db_stats()
+    load_embedder()          # warm the embedder cache
+    collection = load_rag()
+    schema     = load_schema()
+    rows, basins = get_db_stats()
 
     # Stats row
     st.markdown(f'''
@@ -581,7 +613,7 @@ def main():
     # Column catalogue expander
     with st.expander(f'View all 62 retained columns', expanded=False):
         cat_df = pd.DataFrame(COLUMN_CATALOGUE, columns=['Column', 'Unit', 'Description'])
-        st.dataframe(cat_df, use_container_width=True, hide_index=True)
+        st.dataframe(cat_df, width='stretch', hide_index=True)
 
     st.caption('Note: not all fields are populated for every sample. Coverage ranges from ~32% for major oxides to 5-8% for isotope ratios. Queries will only return rows where the requested columns have values.')
 
@@ -594,7 +626,7 @@ def main():
         height=100,
     )
 
-    run = st.button('Run Query', use_container_width=False)
+    run = st.button('Run Query', width='content')
 
     if run:
         question = question.strip()
@@ -609,8 +641,22 @@ def main():
             st.session_state['error']   = None
         else:
             try:
+                with st.spinner('Routing query...'):
+                    route = route_query(question, client)
+
+                context = None
+                if route == 'conceptual':
+                    with st.spinner('Expanding query...'):
+                        expanded = expand_query(question, client)
+                    with st.spinner('Retrieving context...'):
+                        hits    = retrieve(expanded, collection)
+                        context = '\n\n'.join(
+                            f'[{h["source"]}]\n{" ".join(h["chunk"].split()[:CHUNK_WORD_LIMIT])}'
+                            for h in hits
+                        )
+
                 with st.spinner('Generating SQL...'):
-                    sql = generate_sql(question, client, schema, idx, chunks, sources)
+                    sql = generate_sql(question, client, schema, context)
             except RateLimitError:
                 st.session_state['fallback'] = 'Rate limit reached. Please wait a minute and try again.'
                 st.session_state['sql'] = st.session_state['df'] = st.session_state['summary'] = None
@@ -688,7 +734,7 @@ def main():
 
             # Table
             st.markdown(f'<div class="row-count">{len(df):,} rows returned</div>', unsafe_allow_html=True)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
 
             # Download -- key prevents rerun reset
             csv = df.to_csv(index=False).encode('utf-8')
